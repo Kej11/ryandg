@@ -13,12 +13,21 @@ export type AdminLoginState = {
   error: string;
 };
 
+function getSafeRedirectTarget(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || !value.startsWith("/") || value.startsWith("//")) {
+    return "/";
+  }
+
+  return value;
+}
+
 export async function loginAdmin(
   _previousState: AdminLoginState,
   formData: FormData
 ): Promise<AdminLoginState> {
   const username = formData.get("username");
   const password = formData.get("password");
+  const redirectTo = getSafeRedirectTarget(formData.get("redirectTo"));
 
   if (
     typeof username !== "string" ||
@@ -45,7 +54,7 @@ export async function loginAdmin(
     }
   );
 
-  redirect("/admin");
+  redirect(redirectTo);
 }
 
 export async function logoutAdmin() {

@@ -15,6 +15,7 @@ import {
   readDocumentForChat,
   searchDocumentsForChat
 } from "@/lib/server/documents/chat";
+import { assertAdminRequest, isAdminAuthError } from "@/lib/server/admin-auth";
 import { type WorkbookSurface } from "@/lib/workbook-surfaces";
 
 type ChatRequestBody = {
@@ -136,6 +137,7 @@ function sanitizeChatMessages(messages: UIMessage[]) {
 
 export async function POST(request: Request) {
   try {
+    await assertAdminRequest();
     assertAiGatewayConfigured();
 
     const body = (await request.json()) as ChatRequestBody;
@@ -421,6 +423,12 @@ export async function POST(request: Request) {
 
     return result.toUIMessageStreamResponse();
   } catch (error) {
+    if (isAdminAuthError(error)) {
+      return new Response("Admin authentication is required.", {
+        status: 401
+      });
+    }
+
     const message = error instanceof Error ? error.message : "Unable to process chat request.";
 
     return new Response(message, {

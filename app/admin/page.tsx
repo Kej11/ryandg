@@ -10,7 +10,7 @@ export default async function AdminPage() {
   const session = await getAdminSessionFromRequest();
 
   if (!session.isAuthenticated) {
-    redirect("/login");
+    redirect("/login?next=%2Fadmin");
   }
 
   try {

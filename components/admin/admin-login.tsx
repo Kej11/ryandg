@@ -23,7 +23,11 @@ function SubmitButton() {
   );
 }
 
-export function AdminLogin() {
+type AdminLoginProps = {
+  redirectTo?: string;
+};
+
+export function AdminLogin({ redirectTo = "/" }: AdminLoginProps) {
   const [state, formAction] = useActionState(loginAdmin, INITIAL_STATE);
 
   return (
@@ -36,17 +40,18 @@ export function AdminLogin() {
 
           <div className="mt-5 space-y-2">
             <div className="text-[11px] font-medium uppercase tracking-[0.22em] text-primary/80">
-              Admin Access
+              Protected Access
             </div>
             <h1 className="text-2xl font-semibold tracking-[-0.03em] text-foreground">
               Log in
             </h1>
             <p className="text-sm text-muted-foreground">
-              Enter the admin credentials to open the document dashboard.
+              Enter the password to continue to the site.
             </p>
           </div>
 
           <form action={formAction} className="mt-6 space-y-4">
+            <input type="hidden" name="redirectTo" value={redirectTo} />
             <div className="space-y-2">
               <label
                 htmlFor="admin-username"
