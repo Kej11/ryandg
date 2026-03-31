@@ -22,10 +22,20 @@ type ChatRequestBody = {
   messages?: UIMessage[];
 };
 
+const CONVERSATIONAL_SYSTEM_PROMPT = `You are the assistant for Ryan's page.
+
+Rules:
+- For greetings, thanks, acknowledgements, and generic capability questions, respond briefly and warmly.
+- Do not claim to have searched, reviewed, or cited any medical records unless you actually used document tools in a tool-enabled turn.
+- Keep these conversational replies short.
+- If the user wants information from Ryan's records, ask them to ask a specific question about diagnosis, treatment, symptoms, medications, timelines, or uploaded documents.`;
+
 const CHAT_SYSTEM_PROMPT = `You answer questions about Ryan's medical documents.
 
 Rules:
-- Always call search_documents first for every new user question.
+- Only use document tools when the user is asking for information that should come from Ryan's records.
+- Do not search, read, or render documents for greetings, thanks, pleasantries, generic help requests, or other conversational turns that do not require record evidence.
+- Once you decide retrieval is needed, call search_documents first.
 - After searching, call read_document for any document you intend to rely on before answering.
 - After you have enough document context, call exactly one render tool before your final answer so the workbook displays the most useful view for the user.
 - You may continue using tools until you can answer the question or determine the records do not contain the answer.
@@ -135,6 +145,67 @@ function sanitizeChatMessages(messages: UIMessage[]) {
     .filter((message) => message.parts.length > 0);
 }
 
+function getLatestUserText(messages: UIMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+
+    if (message.role !== "user") {
+      continue;
+    }
+
+    const text = message.parts
+      .filter((part) => part.type === "text")
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return "";
+}
+
+function shouldSkipDocumentTools(input: string) {
+  const normalized = input.trim().toLowerCase().replace(/\s+/g, " ");
+
+  if (!normalized) {
+    return true;
+  }
+
+  if (
+    /^(hi|hey|hello|yo|hiya|howdy|sup|what's up|whats up|good morning|good afternoon|good evening)[!.?]*$/.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  if (/^(ok|okay|cool|nice|great|awesome|thanks|thank you|thx|got it|sounds good)[!.?]*$/.test(normalized)) {
+    return true;
+  }
+
+  if (
+    /^(how are you|who are you|what can you do|what can you help with|can you help me|help)[?.!]*$/.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  if (
+    /^(hi|hey|hello)[,!. ]+(how are you|what can you do|what can you help with|can you help me)[?.!]*$/.test(
+      normalized
+    )
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export async function POST(request: Request) {
   try {
     await assertSiteRequest();
@@ -147,11 +218,30 @@ export async function POST(request: Request) {
     }
 
     const sanitizedMessages = sanitizeChatMessages(body.messages);
+    const latestUserText = getLatestUserText(sanitizedMessages);
+    const shouldUseDocumentWorkflow = !shouldSkipDocumentTools(latestUserText);
+
+    const sharedOptions = {
+      model: createGatewayModel(),
+      messages: await convertToModelMessages(sanitizedMessages),
+      experimental_transform: smoothStream({
+        delayInMs: 18,
+        chunking: "word"
+      })
+    } as const;
+
+    if (!shouldUseDocumentWorkflow) {
+      const result = streamText({
+        ...sharedOptions,
+        system: CONVERSATIONAL_SYSTEM_PROMPT
+      });
+
+      return result.toUIMessageStreamResponse();
+    }
 
     const result = streamText({
-      model: createGatewayModel(),
+      ...sharedOptions,
       system: CHAT_SYSTEM_PROMPT,
-      messages: await convertToModelMessages(sanitizedMessages),
       tools: {
         search_documents: tool({
           description:
@@ -378,7 +468,7 @@ export async function POST(request: Request) {
         })
       },
       prepareStep: async ({ stepNumber, steps }) => {
-        if (stepNumber === 0) {
+        if (stepNumber === 0 && shouldUseDocumentWorkflow) {
           return {
             activeTools: ["search_documents"],
             toolChoice: "required"
@@ -414,11 +504,7 @@ export async function POST(request: Request) {
           toolChoice: "auto"
         };
       },
-      stopWhen: stepCountIs(10),
-      experimental_transform: smoothStream({
-        delayInMs: 18,
-        chunking: "word"
-      })
+      stopWhen: stepCountIs(10)
     });
 
     return result.toUIMessageStreamResponse();
