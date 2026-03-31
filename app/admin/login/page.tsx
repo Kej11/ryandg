@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
-import { SiteLogin } from "@/components/site/site-login";
-import { getSiteSessionFromRequest } from "@/lib/server/site-auth";
+import { AdminLogin } from "@/components/admin/admin-login";
+import { getAdminSessionFromRequest } from "@/lib/server/admin-auth";
 
-type LoginPageProps = {
+type AdminLoginPageProps = {
   searchParams?: Promise<{
     next?: string;
   }>;
@@ -10,14 +10,14 @@ type LoginPageProps = {
 
 function getSafeRedirectTarget(value?: string) {
   if (!value || !value.startsWith("/") || value.startsWith("//")) {
-    return "/";
+    return "/admin";
   }
 
   return value;
 }
 
-export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const session = await getSiteSessionFromRequest();
+export default async function AdminLoginPage({ searchParams }: AdminLoginPageProps) {
+  const session = await getAdminSessionFromRequest();
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const redirectTo = getSafeRedirectTarget(resolvedSearchParams?.next);
 
@@ -25,5 +25,5 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     redirect(redirectTo);
   }
 
-  return <SiteLogin redirectTo={redirectTo} />;
+  return <AdminLogin redirectTo={redirectTo} />;
 }

@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation";
 import { LeywareChatShell } from "../components/leyware-chat-shell";
-import { getAdminSessionFromRequest } from "@/lib/server/admin-auth";
+import { getSiteSessionFromRequest } from "@/lib/server/site-auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const session = await getAdminSessionFromRequest();
+  const session = await getSiteSessionFromRequest();
 
   if (!session.isAuthenticated) {
     redirect("/login?next=%2F");

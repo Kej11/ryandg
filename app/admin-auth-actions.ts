@@ -64,5 +64,5 @@ export async function logoutAdmin() {
   await revokeAdminSession(sessionToken);
 
   cookieStore.delete(ADMIN_AUTH_COOKIE_NAME);
-  redirect("/login");
+  redirect("/admin/login");
 }
