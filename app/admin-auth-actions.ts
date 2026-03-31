@@ -4,10 +4,10 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
   ADMIN_AUTH_COOKIE_NAME,
-  DEMO_ADMIN_PASSWORD,
-  DEMO_ADMIN_USERNAME,
-  createAdminToken
+  ADMIN_SESSION_MAX_AGE_SECONDS,
+  validateAdminCredentials
 } from "@/lib/admin-auth";
+import { createAdminSession, revokeAdminSession } from "@/lib/server/admin-auth";
 
 export type AdminLoginState = {
   error: string;
@@ -23,8 +23,7 @@ export async function loginAdmin(
   if (
     typeof username !== "string" ||
     typeof password !== "string" ||
-    username.trim() !== DEMO_ADMIN_USERNAME ||
-    password !== DEMO_ADMIN_PASSWORD
+    !validateAdminCredentials(username, password)
   ) {
     return {
       error: "Incorrect username or password."
@@ -32,16 +31,17 @@ export async function loginAdmin(
   }
 
   const cookieStore = await cookies();
+  const sessionToken = await createAdminSession(username.trim());
 
   cookieStore.set(
     ADMIN_AUTH_COOKIE_NAME,
-    createAdminToken(DEMO_ADMIN_USERNAME, DEMO_ADMIN_PASSWORD),
+    sessionToken,
     {
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: "strict",
       secure: process.env.NODE_ENV === "production",
       path: "/",
-      maxAge: 60 * 60 * 24 * 30
+      maxAge: ADMIN_SESSION_MAX_AGE_SECONDS
     }
   );
 
@@ -50,6 +50,9 @@ export async function loginAdmin(
 
 export async function logoutAdmin() {
   const cookieStore = await cookies();
+  const sessionToken = cookieStore.get(ADMIN_AUTH_COOKIE_NAME)?.value;
+
+  await revokeAdminSession(sessionToken);
 
   cookieStore.delete(ADMIN_AUTH_COOKIE_NAME);
   redirect("/login");

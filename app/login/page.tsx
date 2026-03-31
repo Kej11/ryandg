@@ -1,12 +1,11 @@
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AdminLogin } from "@/components/admin/admin-login";
-import { ADMIN_AUTH_COOKIE_NAME, hasValidAdminCookie } from "@/lib/admin-auth";
+import { getAdminSessionFromRequest } from "@/lib/server/admin-auth";
 
 export default async function LoginPage() {
-  const cookieStore = await cookies();
+  const session = await getAdminSessionFromRequest();
 
-  if (hasValidAdminCookie(cookieStore.get(ADMIN_AUTH_COOKIE_NAME)?.value)) {
+  if (session.isAuthenticated) {
     redirect("/admin");
   }
 

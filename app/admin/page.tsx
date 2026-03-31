@@ -1,19 +1,15 @@
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { AdminConsole } from "@/components/admin/admin-console";
-import {
-  ADMIN_AUTH_COOKIE_NAME,
-  DEMO_ADMIN_USERNAME,
-  hasValidAdminCookie
-} from "@/lib/admin-auth";
+import { getAdminUsername } from "@/lib/admin-auth";
+import { getAdminSessionFromRequest } from "@/lib/server/admin-auth";
 import { listAdminDocuments } from "@/lib/server/documents/repository";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
-  const cookieStore = await cookies();
+  const session = await getAdminSessionFromRequest();
 
-  if (!hasValidAdminCookie(cookieStore.get(ADMIN_AUTH_COOKIE_NAME)?.value)) {
+  if (!session.isAuthenticated) {
     redirect("/login");
   }
 
@@ -23,14 +19,14 @@ export default async function AdminPage() {
     return (
       <AdminConsole
         initialDocuments={documents}
-        username={DEMO_ADMIN_USERNAME}
+        username={session.username ?? getAdminUsername()}
       />
     );
   } catch (error) {
     return (
       <AdminConsole
         initialDocuments={[]}
-        username={DEMO_ADMIN_USERNAME}
+        username={session.username ?? getAdminUsername()}
         initialLoadError={
           error instanceof Error
             ? error.message
