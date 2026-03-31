@@ -3,6 +3,7 @@ import "@hackernoon/pixel-icon-library/fonts/iconfont.css";
 import "./globals.css";
 import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
@@ -11,7 +12,7 @@ export const metadata: Metadata = {
   description: "UI-only recreation of the Leyware chat surface."
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children
 }: Readonly<{
   children: React.ReactNode;
@@ -32,7 +33,9 @@ export default function RootLayout({
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <TooltipProvider>{children}</TooltipProvider>
+      </body>
     </html>
   );
 }

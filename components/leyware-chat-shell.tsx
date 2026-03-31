@@ -1,8 +1,25 @@
 "use client";
 
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import Image from "next/image";
 import { GripVertical, Monitor, Music4, Send } from "lucide-react";
-import { type CSSProperties, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useRef, useState } from "react";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton
+} from "@/components/ai-elements/conversation";
+import {
+  Message,
+  MessageContent,
+  MessageResponse
+} from "@/components/ai-elements/message";
+import { TextShimmerLoader } from "@/components/ui/loader";
+import {
+  isWorkbookSurface,
+  type WorkbookSurface
+} from "@/lib/workbook-surfaces";
 
 type ChatTab = {
   id: string;
@@ -26,9 +43,16 @@ type MockMusic = {
 type SurfaceTab = {
   id: string;
   title: string;
-  kind: "mix_music";
-  music: MockMusic;
-};
+} & (
+  | {
+      kind: "mix_music";
+      music: MockMusic;
+    }
+  | {
+      kind: "workbook_surface";
+      surface: WorkbookSurface;
+    }
+);
 
 type LeywareChatShellProps = {
   isUnlocked?: boolean;
@@ -152,6 +176,196 @@ function MusicPreview({ music }: { music: MockMusic }) {
   );
 }
 
+function formatDocumentLabel(value: string | null) {
+  if (!value) {
+    return "Unknown";
+  }
+
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function WorkbookSurfaceFrame({
+  surface,
+  children
+}: {
+  surface: WorkbookSurface;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mx-auto flex h-full w-full max-w-4xl flex-col gap-4 p-3 sm:p-4">
+      <div className="rounded-xl border bg-card p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+              Surfaced document
+            </div>
+            <h3 className="mt-2 text-lg font-semibold leading-tight text-foreground sm:text-xl">
+              {surface.documentName}
+            </h3>
+            <div className="mt-1 text-sm text-muted-foreground">
+              {surface.documentOriginalName}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+            <span className="rounded-full border px-2.5 py-1">
+              {surface.pageCount ? `${surface.pageCount} page${surface.pageCount === 1 ? "" : "s"}` : "Page count unknown"}
+            </span>
+            <span className="rounded-full border px-2.5 py-1">
+              {formatDocumentLabel(surface.textSource)}
+            </span>
+          </div>
+        </div>
+        <div className="mt-3 rounded-lg border bg-background px-3 py-2 text-[11px] text-muted-foreground">
+          {surface.documentPath}
+        </div>
+      </div>
+
+      {children}
+    </div>
+  );
+}
+
+function DocumentTextSurface({ surface }: { surface: WorkbookSurface & { surfaceType: "document_text" } }) {
+  return (
+    <WorkbookSurfaceFrame surface={surface}>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+        <div className="border-b px-4 py-3">
+          <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            Full extracted text
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
+          <div className="whitespace-pre-wrap text-sm leading-7 text-foreground">
+            {surface.extractedText?.trim() || "No extracted text is available for this document."}
+          </div>
+        </div>
+      </div>
+    </WorkbookSurfaceFrame>
+  );
+}
+
+function SummarySurface({ surface }: { surface: WorkbookSurface & { surfaceType: "summary" } }) {
+  return (
+    <WorkbookSurfaceFrame surface={surface}>
+      <div className="rounded-xl border bg-card p-5">
+        <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+          Summary
+        </div>
+        <div className="mt-3 text-base leading-7 text-foreground">{surface.summary}</div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          {surface.bullets.map((bullet, index) => (
+            <div key={`${surface.surfaceId}-bullet-${index}`} className="rounded-lg border bg-background px-4 py-3 text-sm leading-6 text-foreground">
+              {bullet}
+            </div>
+          ))}
+        </div>
+      </div>
+    </WorkbookSurfaceFrame>
+  );
+}
+
+function KeyFactsSurface({ surface }: { surface: WorkbookSurface & { surfaceType: "key_facts" } }) {
+  return (
+    <WorkbookSurfaceFrame surface={surface}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {surface.facts.map((fact, index) => (
+          <div key={`${surface.surfaceId}-fact-${index}`} className="rounded-xl border bg-card p-4">
+            <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+              {fact.label}
+            </div>
+            <div className="mt-3 text-base font-medium leading-6 text-foreground">{fact.value}</div>
+            {fact.citation ? (
+              <div className="mt-3 text-xs text-muted-foreground">{fact.citation}</div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </WorkbookSurfaceFrame>
+  );
+}
+
+function SourceExcerptsSurface({
+  surface
+}: {
+  surface: WorkbookSurface & { surfaceType: "source_excerpts" };
+}) {
+  return (
+    <WorkbookSurfaceFrame surface={surface}>
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
+        {surface.excerpts.map((excerpt, index) => (
+          <div key={`${surface.surfaceId}-excerpt-${index}`} className="rounded-xl border bg-card p-4">
+            <div className="border-l-2 border-primary/70 pl-4 text-sm leading-7 text-foreground">
+              {excerpt.quote}
+            </div>
+            <div className="mt-3 text-xs text-muted-foreground">{excerpt.citation}</div>
+          </div>
+        ))}
+      </div>
+    </WorkbookSurfaceFrame>
+  );
+}
+
+function TimelineSurface({ surface }: { surface: WorkbookSurface & { surfaceType: "timeline" } }) {
+  return (
+    <WorkbookSurfaceFrame surface={surface}>
+      <div className="rounded-xl border bg-card p-5">
+        <div className="space-y-4">
+          {surface.events.map((event, index) => (
+            <div key={`${surface.surfaceId}-event-${index}`} className="grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
+              <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                {event.date || `Event ${index + 1}`}
+              </div>
+              <div className="rounded-lg border bg-background px-4 py-3">
+                <div className="text-sm font-medium text-foreground">{event.label}</div>
+                <div className="mt-2 text-sm leading-6 text-muted-foreground">{event.description}</div>
+                {event.citation ? (
+                  <div className="mt-3 text-xs text-muted-foreground">{event.citation}</div>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </WorkbookSurfaceFrame>
+  );
+}
+
+function WorkbookSurfacePreview({ surface }: { surface: WorkbookSurface }) {
+  if (surface.surfaceType === "document_text") {
+    return <DocumentTextSurface surface={surface} />;
+  }
+
+  if (surface.surfaceType === "summary") {
+    return <SummarySurface surface={surface} />;
+  }
+
+  if (surface.surfaceType === "key_facts") {
+    return <KeyFactsSurface surface={surface} />;
+  }
+
+  if (surface.surfaceType === "source_excerpts") {
+    return <SourceExcerptsSurface surface={surface} />;
+  }
+
+  return <TimelineSurface surface={surface} />;
+}
+
+function collectWorkbookSurfaces(message: UIMessage) {
+  return message.parts.flatMap((part) => {
+    if (!part.type.startsWith("tool-")) {
+      return [];
+    }
+
+    if (!("state" in part) || part.state !== "output-available" || !("output" in part)) {
+      return [];
+    }
+
+    return isWorkbookSurface(part.output) ? [part.output] : [];
+  });
+}
+
 function ChatWelcomeHeader() {
   return (
     <div className="chat-welcome-header w-full border-b border-border/80 px-4 py-5 sm:px-5 sm:py-6">
@@ -162,9 +376,9 @@ function ChatWelcomeHeader() {
         <h2 className="chat-welcome-title mt-3 text-2xl font-semibold tracking-[-0.03em] text-foreground sm:text-[2rem]">
           {WELCOME_TITLE}
         </h2>
-        <p className="chat-welcome-copy mt-3 max-w-xl text-sm leading-6 text-muted-foreground sm:text-[15px]">
-          {WELCOME_MESSAGE}
-        </p>
+        <div className="chat-welcome-copy mt-3 max-w-xl text-sm leading-6 text-muted-foreground sm:text-[15px]">
+          <MessageResponse>{WELCOME_MESSAGE}</MessageResponse>
+        </div>
       </div>
     </div>
   );
@@ -178,10 +392,55 @@ export function LeywareChatShell({ isUnlocked = false }: LeywareChatShellProps) 
   const [input, setInput] = useState("");
   const [leftWidth, setLeftWidth] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
+  const [isPreviewingLoader, setIsPreviewingLoader] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const dragPointerIdRef = useRef<number | null>(null);
+  const previewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const {
+    messages,
+    sendMessage,
+    status,
+    error,
+    clearError
+  } = useChat({
+    id: activeChatTabId,
+    transport: new DefaultChatTransport({ api: "/api/chat" }),
+    onFinish: ({ message }) => {
+      const surfacedSurfaces = collectWorkbookSurfaces(message);
+
+      if (surfacedSurfaces.length === 0) {
+        return;
+      }
+
+      setSurfaceTabs((currentTabs) => {
+        const nextTabs = [...currentTabs];
+
+        for (const surfacedSurface of surfacedSurfaces) {
+          const nextTab: SurfaceTab = {
+            id: surfacedSurface.surfaceId,
+            title: surfacedSurface.title,
+            kind: "workbook_surface",
+            surface: surfacedSurface
+          };
+          const existingIndex = nextTabs.findIndex((tab) => tab.id === nextTab.id);
+
+          if (existingIndex >= 0) {
+            nextTabs[existingIndex] = nextTab;
+          } else {
+            nextTabs.push(nextTab);
+          }
+        }
+
+        return nextTabs;
+      });
+
+      setActiveSurfaceTabId(surfacedSurfaces[surfacedSurfaces.length - 1]?.surfaceId ?? null);
+    }
+  });
 
   const activeSurfaceTab = surfaceTabs.find((tab) => tab.id === activeSurfaceTabId) ?? null;
+  const isSubmitting = status === "submitted" || status === "streaming";
 
   const updateLeftWidth = (clientX: number) => {
     const rect = containerRef.current?.getBoundingClientRect();
@@ -247,13 +506,30 @@ export function LeywareChatShell({ isUnlocked = false }: LeywareChatShellProps) 
   };
 
   const handleComposerChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (error) {
+      clearError();
+    }
+
     setInput(event.target.value);
     event.target.style.height = "0px";
     event.target.style.height = `${Math.min(event.target.scrollHeight, 200)}px`;
   };
 
-  const handleComposerSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleComposerSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    const nextMessage = input.trim();
+    if (!nextMessage || isSubmitting) {
+      return;
+    }
+
+    setInput("");
+
+    if (composerRef.current) {
+      composerRef.current.style.height = "40px";
+    }
+
+    await sendMessage({ text: nextMessage });
   };
 
   const handleComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -295,6 +571,40 @@ export function LeywareChatShell({ isUnlocked = false }: LeywareChatShellProps) 
     setSurfaceTabs([]);
     setActiveSurfaceTabId(null);
   };
+
+  const handlePreviewLoader = () => {
+    if (!isUnlocked || isSubmitting) {
+      return;
+    }
+
+    if (previewTimeoutRef.current) {
+      clearTimeout(previewTimeoutRef.current);
+    }
+
+    setIsPreviewingLoader(true);
+    previewTimeoutRef.current = setTimeout(() => {
+      setIsPreviewingLoader(false);
+      previewTimeoutRef.current = null;
+    }, 2200);
+  };
+
+  const renderMessageParts = (message: UIMessage) =>
+    message.parts.flatMap((part, index) => {
+      if (part.type !== "text" || part.text.trim().length === 0) {
+        return [];
+      }
+
+      return [
+        <MessageResponse key={`${message.id}-${index}`}>{part.text}</MessageResponse>
+      ];
+    });
+
+  const lastMessage = messages[messages.length - 1];
+  const lastAssistantHasText =
+    lastMessage?.role === "assistant" &&
+    lastMessage.parts.some((part) => part.type === "text" && part.text.trim().length > 0);
+  const shouldShowPendingMessage =
+    isPreviewingLoader || status === "submitted" || (status === "streaming" && !lastAssistantHasText);
 
   return (
     <div className="min-h-svh">
@@ -351,17 +661,93 @@ export function LeywareChatShell({ isUnlocked = false }: LeywareChatShellProps) 
                       );
                     })}
                   </div>
+                  <button
+                    type="button"
+                    onClick={handlePreviewLoader}
+                    disabled={!isUnlocked || isSubmitting || isPreviewingLoader}
+                    className="mb-1 inline-flex h-8 shrink-0 items-center justify-center rounded-md border border-border bg-background px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    {isPreviewingLoader ? "Testing..." : "Test Shimmer"}
+                  </button>
                 </div>
 
                 <div className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-2.5 sm:p-3">
                   <div className="flex min-h-0 flex-1 overflow-hidden">
                     {isUnlocked ? (
-                      <div className="scrollbar-hide flex min-h-0 flex-1 overflow-auto">
-                        <div className="flex w-full flex-col">
-                          <ChatWelcomeHeader />
-                          <div className="flex-1" />
-                        </div>
-                      </div>
+                      <Conversation className="scrollbar-hide min-h-0 flex-1 overflow-auto">
+                        <ConversationContent className="min-h-full gap-0 p-0">
+                          {messages.length === 0 ? (
+                            <div className="flex min-h-full flex-col">
+                              <ChatWelcomeHeader />
+                              {error ? (
+                                <div className="px-4 py-4 sm:px-5">
+                                  <div className="max-w-xl rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                                    {error.message}
+                                  </div>
+                                </div>
+                              ) : null}
+                              {shouldShowPendingMessage ? (
+                                <div className="px-4 pb-4 sm:px-5">
+                                  <Message from="assistant" className="max-w-2xl">
+                                    <MessageContent className="rounded-2xl border bg-background px-4 py-3 text-foreground">
+                                      <TextShimmerLoader
+                                        text="Thinking"
+                                        size="md"
+                                        className="bg-[linear-gradient(to_right,var(--foreground)_30%,#1f9c96_44%,#6fd7cf_50%,#1f9c96_56%,var(--foreground)_70%)] motion-reduce:animate-none"
+                                      />
+                                    </MessageContent>
+                                  </Message>
+                                </div>
+                              ) : null}
+                              <div className="flex-1" />
+                            </div>
+                          ) : (
+                            <div className="flex min-h-full flex-col">
+                              <div className="flex flex-col gap-4 px-4 py-5 sm:px-5 sm:py-6">
+                                {messages.map((message) => {
+                                  const messageContent = renderMessageParts(message);
+
+                                  if (messageContent.length === 0) {
+                                    return null;
+                                  }
+
+                                  return (
+                                    <Message
+                                      key={message.id}
+                                      from={message.role}
+                                      className={message.role === "assistant" ? "max-w-2xl" : "max-w-[34rem]"}
+                                    >
+                                      <MessageContent>{messageContent}</MessageContent>
+                                    </Message>
+                                  );
+                                })}
+
+                                {shouldShowPendingMessage ? (
+                                  <Message from="assistant" className="max-w-2xl">
+                                    <MessageContent className="rounded-2xl border bg-background px-4 py-3 text-foreground">
+                                      <TextShimmerLoader
+                                        text="Thinking"
+                                        size="md"
+                                        className="bg-[linear-gradient(to_right,var(--foreground)_30%,#1f9c96_44%,#6fd7cf_50%,#1f9c96_56%,var(--foreground)_70%)] motion-reduce:animate-none"
+                                      />
+                                    </MessageContent>
+                                  </Message>
+                                ) : null}
+
+                                {error ? (
+                                  <Message from="assistant" className="max-w-2xl">
+                                    <MessageContent className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+                                      {error.message}
+                                    </MessageContent>
+                                  </Message>
+                                ) : null}
+                              </div>
+                              <div className="flex-1" />
+                            </div>
+                          )}
+                        </ConversationContent>
+                        <ConversationScrollButton />
+                      </Conversation>
                     ) : (
                       <div className="flex flex-1 items-center justify-center px-6 text-center">
                         <p className="text-sm text-muted-foreground">Ask anything to get started</p>
@@ -375,18 +761,20 @@ export function LeywareChatShell({ isUnlocked = false }: LeywareChatShellProps) 
                   >
                     <div className="p-3">
                       <textarea
+                        ref={composerRef}
                         rows={1}
                         value={input}
                         onChange={handleComposerChange}
                         onKeyDown={handleComposerKeyDown}
                         placeholder="What would you like to know?"
+                        disabled={!isUnlocked || isSubmitting}
                         className="max-h-[200px] min-h-[40px] w-full resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
                       />
                     </div>
                     <div className="flex px-3 pb-3 sm:hidden">
                       <button
                         type="submit"
-                        disabled={input.trim().length === 0}
+                        disabled={!isUnlocked || isSubmitting || input.trim().length === 0}
                         className="inline-flex h-9 w-full items-center justify-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
                         aria-label="Send message"
                       >
@@ -397,7 +785,7 @@ export function LeywareChatShell({ isUnlocked = false }: LeywareChatShellProps) 
                     <div className="hidden items-center justify-end border-t px-3 py-2 sm:flex">
                       <button
                         type="submit"
-                        disabled={input.trim().length === 0}
+                        disabled={!isUnlocked || isSubmitting || input.trim().length === 0}
                         className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
                         aria-label="Send message"
                       >
@@ -489,7 +877,11 @@ export function LeywareChatShell({ isUnlocked = false }: LeywareChatShellProps) 
                 <div className="flex-1 overflow-hidden bg-white">
                   {activeSurfaceTab ? (
                     <div className="h-full overflow-auto">
-                      <MusicPreview music={activeSurfaceTab.music} />
+                      {activeSurfaceTab.kind === "mix_music" ? (
+                        <MusicPreview music={activeSurfaceTab.music} />
+                      ) : (
+                        <WorkbookSurfacePreview surface={activeSurfaceTab.surface} />
+                      )}
                     </div>
                   ) : (
                     <div className="flex h-full items-center justify-center p-4 sm:p-6">
